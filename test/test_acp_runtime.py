@@ -3844,7 +3844,7 @@ class TestAcpRuntimeLoadSession:
             seen.append(threading.current_thread())
             return []
 
-        monkeypatch.setattr(rt_mod, "pooled_session_servers", _recording_pooled)
+        monkeypatch.setattr(rt_mod, "session_mcp_servers", _recording_pooled)
 
         async def _fake_send(method, params, timeout=None):
             if method == METHOD_SESSION_LOAD:
@@ -3854,17 +3854,17 @@ class TestAcpRuntimeLoadSession:
         monkeypatch.setattr(rt, "_send_and_await", _fake_send)
         await rt.load_session("/k/sid.json", "sid-t", cwd="/w", agent="kirocrew")
 
-        assert seen, "load_session never consulted pooled_session_servers"
+        assert seen, "load_session never consulted session_mcp_servers"
         assert all(t is not loop_thread for t in seen)
 
     def test_every_session_request_builder_consults_pooled_servers(self):
-        """#3528 guard: the stub injection now lives at multiple call sites in
-        two files, and this bug was exactly one of them silently sending [].
-        Enumerate every function that issues session/new or session/load and
-        assert each one consults the pooled-stub resolution (either
-        pooled_session_servers directly or the _pooled_mcp_servers hook), so a
-        fourth builder — or a regression in an existing one — fails here
-        instead of shipping another silent un-pooling path."""
+        """#3528 guard: the MCP roster injection now lives at multiple call
+        sites in two files, and this bug was exactly one of them silently
+        sending []. Enumerate every function that issues session/new or
+        session/load and assert each one consults the roster (session_mcp_servers,
+        pooled_session_servers, or the _pooled_mcp_servers hook), so a fourth
+        builder — or a regression in an existing one — fails here instead of
+        shipping another silent un-pooling path."""
         import ast
         import inspect
 
@@ -3903,10 +3903,12 @@ class TestAcpRuntimeLoadSession:
         } <= builders.keys(), f"expected builders missing from scan: {sorted(builders)}"
         for name, body in builders.items():
             assert (
-                "pooled_session_servers" in body or "_pooled_mcp_servers" in body
+                "pooled_session_servers" in body
+                or "session_mcp_servers" in body
+                or "_pooled_mcp_servers" in body
             ), (
                 f"{name} issues session/new or session/load but never consults "
-                "the pooled broker stubs — it would un-pool its sessions (#3528)"
+                "the session MCP roster — it would un-pool its sessions (#3528)"
             )
 
 

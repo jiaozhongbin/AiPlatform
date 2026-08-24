@@ -199,6 +199,15 @@ means "nothing to preserve", never "abort the refresh".
 Writer: `apps/bridges.py::_register_agents`, `_preserve_user_agent_edits`,
 `_read_agent_config`.
 
+kiro-cli mounts a server only when `tools` references it (`@<server>` or
+`@<server>/<tool>`). A template that declares `mcpServers` but lists only
+built-in tools (read/glob/grep) is shown in the dashboard and still has no
+runtime tools. `_ensure_declared_mcp_tool_refs` appends `@<server>` for each
+template-declared, non-disabled server that has no such ref. A per-tool grant
+already on the template is not widened to a blanket `@<server>`. App-namespaced
+servers merged from `_own_mcp_servers` stay opt-in via the template `tools`
+list.
+
 ## 4. A generated prompt is pinned through the app's policy
 
 An agent template packaged inside an app can only name paths that exist at

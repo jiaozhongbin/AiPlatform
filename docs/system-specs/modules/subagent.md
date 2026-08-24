@@ -570,8 +570,15 @@ Decision + lifecycle:
 - `_create_shared_session()` resolves the parent's `AcpRuntime` via
   `_get_parent_runtime()` (falling back to `SessionManager.get_subagent_runtime()`
   — a companion runtime), calls `runtime.create_session()`, and wraps the handle
-  in `AcpSessionProvider`. `SubagentInfo._session_sharing` / `_shared_provider`
-  record the shared path.
+  in `AcpSessionProvider`. `create_session` injects `session_mcp_servers()` so
+  the new session gets the parent's/agent's MCP roster (stubs plus unpooled
+  launch specs). An empty `mcpServers` list would leave those tools absent —
+  kiro-cli does not re-read the agent file for additional sessions on a shared
+  process. kiro-cli also mounts a server only when the agent's `tools`
+  allowlist references it (`@<server>` or `@<server>/<tool>`); a declared
+  `mcpServers` row without that ref never starts. App-agent materialization
+  adds the missing `@<server>` grant. `SubagentInfo._session_sharing` /
+  `_shared_provider` record the shared path.
 - On any failure the code falls back transparently to the legacy
   per-process path (`get_or_create`).
 - Cleanup (`_run` finally + `_force_reap`) calls `_shared_provider.shutdown()` to

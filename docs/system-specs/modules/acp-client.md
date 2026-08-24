@@ -136,12 +136,15 @@ flag passed to `kiro-cli acp` at spawn time drives all configuration:
   agent's own `model` field. Only the default kirocrew agent gets KiroCrew's
   configured model override.
 - **MCP servers**: backend-dependent.
-  - **kiro-cli**: `session/new` passes `mcpServers: []` — kiro-cli loads
-    servers from the agent config (respects `mcpServers` in the agent's config
-    file). Non-kirocrew agents (e.g. AIM-installed) load only their own
-    `mcpServers`. The kirocrew agent loads from global `~/.kiro/settings/mcp.json`
-    where `disabled` and `disabledTools` flags are respected. KiroCrew's dashboard
-    MCP tab writes directly to the global config.
+  - **kiro-cli**: `session/new` and `session/load` pass the session MCP roster
+    from `session_mcp_servers()` — broker stubs for poolable servers, plus
+    unpooled launch specs from the overlay or the agent file. A session-injected
+    server outranks the same-named agent-spec entry. Additional sessions on a
+    shared runtime (subagents) never re-read the agent file, so an empty list
+    would leave those tools absent. The default `kirocrew` agent file already
+    contains the merged global `~/.kiro/settings/mcp.json`; custom/app agents
+    load only their own `mcpServers`. `disabled` and `disabledTools` are
+    respected. KiroCrew's dashboard MCP tab writes the global config.
   - **claude-agent-acp**: does NOT read any config file or `--agent` flag, so
     `session/new` (and `session/load`) must carry the servers in the
     `mcpServers` param. `_claude_acp_mcp_servers()` reads the KiroCrew-owned

@@ -28,6 +28,7 @@ from kiro_crew.mcp_gateway.session_servers import (
     _acp_env,
     _acp_server_entry,
     pooled_session_servers,
+    session_mcp_servers,
 )
 
 
@@ -56,19 +57,27 @@ def _write_overlay(tmp_path: Path, agent: str, servers: dict) -> Path:
 
 
 def test_injects_only_wrapped_stub_entries(tmp_path):
-    overlay = _write_overlay(tmp_path, "kirocrew", {
-        "pooled": _stub(),
-        "unpooled": {"command": "npx", "args": ["-y", "srv"], "env": {"TOKEN": "s3cr3t"}},
-    })
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "pooled": _stub(),
+            "unpooled": {"command": "npx", "args": ["-y", "srv"], "env": {"TOKEN": "s3cr3t"}},
+        },
+    )
     out = pooled_session_servers(overlay, "kirocrew")
     assert [e["name"] for e in out] == ["pooled"]
 
 
 def test_unpooled_server_env_is_never_transmitted(tmp_path):
     """A non-poolable server's credentials must stay in the spec file."""
-    overlay = _write_overlay(tmp_path, "kirocrew", {
-        "secretive": {"command": "npx", "env": {"API_KEY": "s3cr3t"}},
-    })
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "secretive": {"command": "npx", "env": {"API_KEY": "s3cr3t"}},
+        },
+    )
     assert pooled_session_servers(overlay, "kirocrew") == []
     assert "s3cr3t" not in json.dumps(pooled_session_servers(overlay, "kirocrew"))
 
@@ -82,11 +91,19 @@ def test_stub_name_is_preserved_so_it_shadows_the_spec_entry(tmp_path):
 
 
 def test_entries_are_name_sorted_for_deterministic_params(tmp_path):
-    overlay = _write_overlay(tmp_path, "kirocrew", {
-        "zeta": _stub(), "alpha": _stub(), "mid": _stub(),
-    })
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "zeta": _stub(),
+            "alpha": _stub(),
+            "mid": _stub(),
+        },
+    )
     assert [e["name"] for e in pooled_session_servers(overlay, "kirocrew")] == [
-        "alpha", "mid", "zeta",
+        "alpha",
+        "mid",
+        "zeta",
     ]
 
 
@@ -102,9 +119,13 @@ def test_marker_is_stripped_from_the_injected_element(tmp_path):
 
 def test_operator_passthrough_keys_survive(tmp_path):
     """Dropping autoApprove would re-prompt for already-approved tools."""
-    overlay = _write_overlay(tmp_path, "kirocrew", {
-        "pooled": _stub(timeout=9000, type="stdio", disabledTools=["x"]),
-    })
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "pooled": _stub(timeout=9000, type="stdio", disabledTools=["x"]),
+        },
+    )
     (entry,) = pooled_session_servers(overlay, "kirocrew")
     assert entry["autoApprove"] == ["fetch___fetch"]
     assert entry["timeout"] == 9000
@@ -141,9 +162,14 @@ def test_entry_without_command_is_skipped():
 
 
 def test_commandless_stub_does_not_suppress_others(tmp_path):
-    overlay = _write_overlay(tmp_path, "kirocrew", {
-        "broken": _stub(command=""), "fine": _stub(),
-    })
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "broken": _stub(command=""),
+            "fine": _stub(),
+        },
+    )
     assert [e["name"] for e in pooled_session_servers(overlay, "kirocrew")] == ["fine"]
 
 
@@ -169,8 +195,9 @@ def test_corrupt_overlay_degrades_to_unpooled(tmp_path):
     assert pooled_session_servers(overlay, "kirocrew") == []
 
 
-@pytest.mark.parametrize("body", ["[]", '"str"', "null", '{"mcpServers": []}',
-                                  '{"mcpServers": "x"}', "{}"])
+@pytest.mark.parametrize(
+    "body", ["[]", '"str"', "null", '{"mcpServers": []}', '{"mcpServers": "x"}', "{}"]
+)
 def test_malformed_spec_shapes_degrade_to_unpooled(tmp_path, body):
     overlay = tmp_path / "agents"
     overlay.mkdir(exist_ok=True)
@@ -183,6 +210,116 @@ def test_non_dict_server_entry_is_skipped(tmp_path):
     assert [e["name"] for e in pooled_session_servers(overlay, "kirocrew")] == ["good"]
 
 
+# ── additional-session roster: stubs plus unpooled agent servers ─────────────
+# session/new on a shared runtime (subagents) does not re-read the agent file,
+# so unpooled servers must be injected too or the new session never starts them.
+
+
+def test_session_roster_includes_unpooled_overlay_servers(tmp_path):
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "pooled": _stub(),
+            "studio": {"command": "npx", "args": ["-y", "roblox-studio-mcp"]},
+        },
+    )
+    names = [e["name"] for e in session_mcp_servers(overlay, "kirocrew")]
+    assert names == ["pooled", "studio"]
+
+
+def test_session_roster_stub_outranks_same_named_unpooled(tmp_path):
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "fetch": _stub(),
+            # Same name, raw spec: injection must keep the stub so pooling stays.
+        },
+    )
+    (entry,) = session_mcp_servers(overlay, "kirocrew")
+    assert entry["name"] == "fetch"
+    assert entry["command"].endswith("mc-mcp-stub-wrapper.sh")
+
+
+def test_session_roster_carries_unpooled_launch_env(tmp_path):
+    """Additional sessions cannot read the spec file; the launch env must ride."""
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "studio": {
+                "command": "npx",
+                "args": ["-y", "srv"],
+                "env": {"TOKEN": "launch-token"},
+            },
+        },
+    )
+    (entry,) = session_mcp_servers(overlay, "kirocrew")
+    assert entry["env"] == [{"name": "TOKEN", "value": "launch-token"}]
+
+
+def test_session_roster_skips_disabled_unpooled(tmp_path):
+    overlay = _write_overlay(
+        tmp_path,
+        "kirocrew",
+        {
+            "off": {"command": "npx", "args": ["x"], "disabled": True},
+            "on": {"command": "npx", "args": ["y"]},
+        },
+    )
+    assert [e["name"] for e in session_mcp_servers(overlay, "kirocrew")] == ["on"]
+
+
+def test_session_roster_reads_agent_file_when_gateway_off(tmp_path, monkeypatch):
+    import kiro_crew.config.paths as paths
+
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    (agents / "builder.json").write_text(
+        json.dumps(
+            {
+                "name": "builder",
+                "mcpServers": {
+                    "studio": {"command": "npx", "args": ["-y", "roblox-studio-mcp"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "_agents_dir_override", lambda: agents)
+    names = [e["name"] for e in session_mcp_servers(None, "builder")]
+    assert names == ["studio"]
+
+
+def test_session_roster_finds_namespaced_agent_file(tmp_path, monkeypatch):
+    import kiro_crew.config.paths as paths
+
+    agents = tmp_path / "agents"
+    agents.mkdir()
+    (agents / "roblox-mvp--roblox-mvp-builder.json").write_text(
+        json.dumps(
+            {
+                "name": "roblox-mvp-builder",
+                "mcpServers": {
+                    "studio": {"command": "npx", "args": ["-y", "roblox-studio-mcp"]},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "_agents_dir_override", lambda: agents)
+    names = [e["name"] for e in session_mcp_servers(None, "roblox-mvp-builder")]
+    assert names == ["studio"]
+
+
+def test_session_roster_empty_when_gateway_off_and_no_agent_file(tmp_path, monkeypatch):
+    import kiro_crew.config.paths as paths
+
+    monkeypatch.setattr(paths, "_agents_dir_override", lambda: tmp_path / "absent")
+    assert session_mcp_servers(None, "kirocrew") == []
+
+
 # ── the mechanism itself, pinned against the shipped binary ─────────────────
 
 
@@ -193,9 +330,7 @@ REAL_CLI = shutil.which("kiro-cli")
 #: shell is not, and the marker path arrives as ``argv`` so a Windows path's
 #: backslashes never pass through a string literal.
 _PROBE_SNIPPET = (
-    "import pathlib,sys,time;"
-    "pathlib.Path(sys.argv[1]).write_text('x');"
-    "time.sleep(20)"
+    "import pathlib,sys,time;" "pathlib.Path(sys.argv[1]).write_text('x');" "time.sleep(20)"
 )
 
 _DRIVER = r"""
@@ -292,21 +427,32 @@ def test_real_kiro_cli_prefers_session_injected_server():
         (root / "khome" / "agents").mkdir(parents=True)
         (root / "proj").mkdir()
         (root / "marks").mkdir()
-        (root / "khome" / "agents" / "pooltest.json").write_text(json.dumps({
-            "name": "pooltest",
-            "description": "precedence probe",
-            "model": "claude-haiku-4.5",
-            "tools": [],
-            "prompt": "probe",
-            "mcpServers": {"shared": {
-                "command": sys.executable,
-                "args": ["-c", _PROBE_SNIPPET, str(root / "marks" / "FROM_SPEC")],
-            }},
-        }), encoding="utf-8")
+        (root / "khome" / "agents" / "pooltest.json").write_text(
+            json.dumps(
+                {
+                    "name": "pooltest",
+                    "description": "precedence probe",
+                    "model": "claude-haiku-4.5",
+                    "tools": [],
+                    "prompt": "probe",
+                    "mcpServers": {
+                        "shared": {
+                            "command": sys.executable,
+                            "args": ["-c", _PROBE_SNIPPET, str(root / "marks" / "FROM_SPEC")],
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         driver = root / "drive.py"
         driver.write_text(_DRIVER, encoding="utf-8")
-        subprocess.run([sys.executable, str(driver), str(root), _PROBE_SNIPPET],
-                       capture_output=True, timeout=180, check=False)
+        subprocess.run(
+            [sys.executable, str(driver), str(root), _PROBE_SNIPPET],
+            capture_output=True,
+            timeout=180,
+            check=False,
+        )
         deadline = time.time() + 5
         while time.time() < deadline and not (root / "marks" / "INJECTED").exists():
             time.sleep(0.2)

@@ -9,11 +9,13 @@ project, to their ``~/.kiro/agents/``, or through a bind mount — so pooling
 works with ``agent.sandbox`` set to ``off`` (the default) and on macOS and
 Windows, neither of which can bind-mount.
 
-Only stub entries are injected. A non-poolable server is left entirely to the
-agent spec, so its ``env`` — which routinely holds tokens and API keys — never
-leaves the file it was declared in. Stub entries carry ``env: {}`` by
-construction (``rewriter._build_stub_entry``): the pooled backend is spawned by
-gatewayd, not by kiro-cli, so no credential is transmitted here either.
+``pooled_session_servers`` injects only stub entries. A non-poolable server's
+``env`` stays out of that list so credentials are not copied into the stub
+roster. Additional ACP sessions on a shared runtime (subagents) do not re-read
+the agent file, so ``session_mcp_servers`` also injects those unpooled launch
+specs — otherwise the new session never starts them. Stub entries still carry
+``env: {}`` by construction (``rewriter._build_stub_entry``): the pooled
+backend is spawned by gatewayd, not by kiro-cli.
 
 Precedence caveat: same-name override is verified against the shipped binary
 (``test_mcp_gateway_session_inject.py`` pins it, including a live check when
@@ -31,6 +33,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from kiro_crew.config.paths import kiro_agents_dir
 from kiro_crew.mcp_gateway.rewriter import _WRAPPER_MARKER, _WRAPPER_MARKER_LEGACY
 
 logger = logging.getLogger(__name__)
@@ -70,25 +73,45 @@ def _acp_server_entry(
     per session, so the stub does not need to recover it by walking its
     ancestors' ``/proc/<pid>/environ`` from a bash launcher.
     """
+    if entry.get("disabled") is True:
+        return None
     command = entry.get("command")
     if not isinstance(command, str) or not command:
         # A stub without a command cannot be launched; injecting it would
         # shadow the agent's working entry with a broken one. Skip instead,
-        # leaving the spec's own server in place.
-        return None
-    args = [a if isinstance(a, str) else json.dumps(a, sort_keys=True, default=str)
-            for a in (entry.get("args") or [])]
+        # leaving the spec's own server in place. HTTP/SSE entries use ``url``
+        # rather than ``command`` and are shaped below.
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            return None
+        shaped_url: dict[str, Any] = {
+            k: v for k, v in entry.items() if k not in _ACP_RESERVED and k != "command"
+        }
+        shaped_url.update(
+            {
+                "name": name,
+                "url": url,
+                "env": _acp_env(entry.get("env")),
+            }
+        )
+        return shaped_url
+    args = [
+        a if isinstance(a, str) else json.dumps(a, sort_keys=True, default=str)
+        for a in (entry.get("args") or [])
+    ]
     if channel_id and "--channel-id" not in args:
         args.extend(["--channel-id", channel_id])
     shaped: dict[str, Any] = {
         k: v for k, v in entry.items() if k not in _ACP_RESERVED and k != "command"
     }
-    shaped.update({
-        "name": name,
-        "command": command,
-        "args": args,
-        "env": _acp_env(entry.get("env")),
-    })
+    shaped.update(
+        {
+            "name": name,
+            "command": command,
+            "args": args,
+            "env": _acp_env(entry.get("env")),
+        }
+    )
     return shaped
 
 
@@ -141,7 +164,9 @@ def _load_overlay_for_agent(overlay_dir: Path, agent: str) -> dict[str, Any] | N
         logger.debug(
             "MCP-gateway: no overlay with name %r among %d filename-qualified "
             "candidate(s) in %s; session runs unpooled",
-            agent, len(candidates), overlay_dir,
+            agent,
+            len(candidates),
+            overlay_dir,
         )
     return None
 
@@ -191,6 +216,89 @@ def pooled_session_servers(
     return out
 
 
+def _is_stub_entry(entry: dict[str, Any]) -> bool:
+    return bool(entry.get(_WRAPPER_MARKER) or entry.get(_WRAPPER_MARKER_LEGACY))
+
+
+def _load_agent_spec(agent: str) -> dict[str, Any] | None:
+    """Read ``~/.kiro/agents/<agent>.json``, or a namespaced file whose ``name`` matches.
+
+    App agents are materialized as ``<app>--<agent>.json`` while sessions request
+    them by the spec's ``name`` field. Mirror the overlay lookup: exact filename
+    first, then a suffix glob confirmed against ``name``. Fail-soft.
+    """
+    agents_dir = kiro_agents_dir()
+    direct = agents_dir / f"{agent}.json"
+    try:
+        data = json.loads(direct.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        data = None
+    except (OSError, ValueError):
+        logger.warning("MCP-gateway: cannot read agent spec %s", direct, exc_info=True)
+        return None
+    if isinstance(data, dict):
+        return data
+    try:
+        candidates = sorted(agents_dir.glob(f"*{agent}.json"))
+    except (OSError, ValueError):
+        return None
+    for path in candidates:
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(parsed, dict) and parsed.get("name") == agent:
+            return parsed
+    return None
+
+
+def _shape_unpooled(
+    servers: dict[str, Any],
+    *,
+    skip_names: set[str],
+    channel_id: str | None,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for name, entry in sorted(servers.items()):
+        if name in skip_names or not isinstance(entry, dict) or _is_stub_entry(entry):
+            continue
+        shaped = _acp_server_entry(str(name), entry, channel_id)
+        if shaped is not None:
+            out.append(shaped)
+    return out
+
+
+def session_mcp_servers(
+    overlay_dir: str | Path | None,
+    agent: str | None,
+    channel_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """ACP ``session/new`` roster: broker stubs plus unpooled agent servers.
+
+    Stubs come from the gateway overlay and outrank a same-named agent entry.
+    Unpooled stdio/HTTP servers are then taken from the overlay when one
+    exists, otherwise from the agent's on-disk spec (gateway off, or an agent
+    the rewriter never emitted). Additional sessions on a shared runtime only
+    see this list — they do not re-read the agent file — so omitting unpooled
+    servers leaves those tools absent on every subagent.
+    """
+    stubs = pooled_session_servers(overlay_dir, agent, channel_id)
+    if not agent:
+        return stubs
+    stub_names = {str(e.get("name")) for e in stubs if e.get("name")}
+    spec: dict[str, Any] | None = None
+    if overlay_dir:
+        spec = _load_overlay_for_agent(Path(overlay_dir), agent)
+    if spec is None:
+        spec = _load_agent_spec(agent)
+    if not isinstance(spec, dict):
+        return stubs
+    servers = spec.get("mcpServers")
+    if not isinstance(servers, dict):
+        return stubs
+    return stubs + _shape_unpooled(servers, skip_names=stub_names, channel_id=channel_id)
+
+
 def injection_server_names(
     overlay_dir: str | Path | None,
     agent: str | None,
@@ -214,8 +322,8 @@ def injection_server_names(
     if not isinstance(servers, dict):
         return frozenset()
     return frozenset(
-        name for name, entry in servers.items()
-        if isinstance(entry, dict) and (
-            entry.get(_WRAPPER_MARKER) or entry.get(_WRAPPER_MARKER_LEGACY)
-        )
+        name
+        for name, entry in servers.items()
+        if isinstance(entry, dict)
+        and (entry.get(_WRAPPER_MARKER) or entry.get(_WRAPPER_MARKER_LEGACY))
     )

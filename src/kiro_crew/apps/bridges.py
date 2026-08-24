@@ -600,6 +600,41 @@ def _materialize_managed_refs(agent_data: dict[str, Any]) -> None:
     agent_data["mcpServers"] = servers
 
 
+def _tools_reference_mcp_server(tools: list[Any], name: str) -> bool:
+    """True when ``tools`` already grants ``@name`` or ``@name/<tool>``."""
+    ref = f"@{name}"
+    prefix = f"{ref}/"
+    return any(
+        isinstance(entry, str) and (entry == ref or entry.startswith(prefix))
+        for entry in tools
+    )
+
+
+def _ensure_declared_mcp_tool_refs(
+    agent_data: dict[str, Any], declared_names: set[str]
+) -> None:
+    """Add ``@name`` so kiro-cli will mount template-declared MCP servers.
+
+    kiro-cli loads a server only when ``tools`` references it. A template can
+    declare ``mcpServers`` (the dashboard shows the row) while listing only
+    built-in tools; without the ref the server never starts and ``spawn_run``
+    of that agent sees none of its tools. Names merged from
+    :func:`_own_mcp_servers` are not in *declared_names* and stay opt-in via
+    the template's own ``tools`` list.
+    """
+    tools = agent_data.get("tools")
+    servers = agent_data.get("mcpServers")
+    if not isinstance(tools, list) or not isinstance(servers, dict) or not declared_names:
+        return
+    for name in sorted(declared_names):
+        entry = servers.get(name)
+        if not isinstance(entry, dict) or entry.get("disabled") is True:
+            continue
+        if _tools_reference_mcp_server(tools, name):
+            continue
+        tools.append(f"@{name}")
+
+
 def _unresolvable_tool_refs(agent_data: dict[str, Any]) -> list[str]:
     """``@server``/``@server/tool`` grants whose server no config declares.
 
@@ -947,9 +982,17 @@ def _register_agents(app_name: str, manifest: AppManifest, app_root: Path) -> li
         # DISAPPEAR. Leaving the old entry in place means a failed write leaves the
         # last-good config untouched.
         try:
+            declared_mcp = agent_data.get("mcpServers")
+            declared_names = {
+                str(name)
+                for name, entry in (
+                    declared_mcp.items() if isinstance(declared_mcp, dict) else ()
+                )
+                if isinstance(entry, dict) and entry.get("disabled") is not True
+            }
             # The app's own servers are always granted -- they are declared by
-            # the manifest, not chosen by the user, and the agent's `tools`
-            # already references them.
+            # the manifest, not chosen by the user. Template-declared servers
+            # get an ``@name`` mount ref below if ``tools`` is an allowlist.
             if own_servers:
                 agent_data["mcpServers"] = {
                     **own_servers,
@@ -972,6 +1015,7 @@ def _register_agents(app_name: str, manifest: AppManifest, app_root: Path) -> li
             _servers = merged.get("mcpServers")
             if isinstance(_servers, dict):
                 merged["mcpServers"] = _strip_ungoverned_auto_approve(_servers)
+            _ensure_declared_mcp_tool_refs(merged, declared_names)
             # The map above is FINAL — every source of servers has been merged —
             # so this is the one point a dangling `@` grant is decidable. Warn,
             # never reject: kiro-cli just skips the ref, so the agent works

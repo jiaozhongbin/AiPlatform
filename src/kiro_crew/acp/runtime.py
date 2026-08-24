@@ -98,7 +98,7 @@ from kiro_crew.config.paths import kiro_agents_dir
 from kiro_crew.constants import KIROCREW_SPAWNED_ENV, KIROCREW_SPAWNED_VALUE
 from kiro_crew.env import augmented_path, resolve_krb5_ccname
 from kiro_crew.executors import subprocess_executor
-from kiro_crew.mcp_gateway.session_servers import pooled_session_servers
+from kiro_crew.mcp_gateway.session_servers import session_mcp_servers
 from kiro_crew.metrics.events import (
     CHILD_PERMISSION_DENIED,
     CHILD_PERMISSION_ROUTED,
@@ -2597,15 +2597,15 @@ class AcpRuntime:
         if not self._initialized:
             raise AcpRuntimeError("Runtime not initialized — call spawn() first")
 
-        # Inject the shared gateway's broker stubs unless the caller supplied an
-        # explicit list. A session-injected server outranks the same-named entry
-        # in the agent spec, so this is what actually pools the servers — no file
-        # is written anywhere. Empty when the gateway is disabled.
+        # Inject the session MCP roster unless the caller supplied an explicit
+        # list. A session-injected server outranks the same-named agent-spec
+        # entry, so stubs pool without writing a file. Unpooled servers ride
+        # the same list so additional sessions (subagents) still start them.
         if mcp_servers is None:
             # Resolve the overlay off the event loop: the lookup stats/reads
             # files, and blocking the loop stalls every other session's I/O.
             mcp_servers = await asyncio.to_thread(
-                pooled_session_servers, self._mcp_gateway_overlay, agent or self._agent
+                session_mcp_servers, self._mcp_gateway_overlay, agent or self._agent
             )
         # The agent to run: an explicit request, else the runtime default. KAS
         # has no --agent spawn flag, so its default must be BOTH injected (below)
@@ -2752,18 +2752,15 @@ class AcpRuntime:
         if not self._can_load_session:
             raise AcpRuntimeError("Backend does not advertise session/load support")
 
-        # Re-declare the pooled broker stubs so a resumed session keeps talking
-        # to the broker — same injection as create_session() and the AcpClient
-        # resume path (client.py). session/load re-initializes the session's MCP
-        # servers (see the budget note below), so an empty list here is APPLIED,
-        # not ignored: the stubs stop shadowing the agent spec's same-named
-        # entries and kiro-cli spawns its own copy of every pooled server,
-        # silently un-pooling the session for the rest of its life. Resolved off
-        # the event loop — the overlay lookup stats and reads files. Empty when
-        # the shared gateway is disabled, so non-pooled installs still send [].
+        # Re-declare the session MCP roster so a resumed session keeps talking
+        # to the broker (and still starts unpooled servers). session/load
+        # re-initializes MCP, so an empty list is APPLIED, not ignored: stubs
+        # stop shadowing the spec and kiro-cli would spawn its own copy of
+        # every pooled server. Resolved off the event loop. Gateway off still
+        # injects unpooled servers from the agent file.
         active_agent = agent or self._agent
         mcp_servers = await asyncio.to_thread(
-            pooled_session_servers, self._mcp_gateway_overlay, active_agent
+            session_mcp_servers, self._mcp_gateway_overlay, active_agent
         )
         load_params: dict[str, Any] = {
             "sessionId": resume_sid,

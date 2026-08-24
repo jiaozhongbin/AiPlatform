@@ -124,7 +124,7 @@ from kiro_crew.hooks import (
 )
 from kiro_crew.kiro_cli import resolve_kiro_cli
 from kiro_crew.mcp_gateway.claim import schedule_claim
-from kiro_crew.mcp_gateway.session_servers import pooled_session_servers
+from kiro_crew.mcp_gateway.session_servers import session_mcp_servers
 from kiro_crew.resource_status import inject_xdist_auto_cap
 from kiro_crew.sandbox import (
     RLIMIT_PROFILE_SESSION_HOST,
@@ -2232,14 +2232,15 @@ class AcpClient:
         return self.backend == ACP_BACKEND_KIRO
 
     def _pooled_mcp_servers(self) -> list[dict[str, Any]]:
-        """Broker-stub ``mcpServers`` entries for this session's ``session/new``.
+        """``mcpServers`` entries for this session's ``session/new``.
 
-        A session-injected server outranks the same-named entry in the resolved
-        agent spec, so injecting the stubs here is what actually pools the
-        servers — nothing is written to the user's project or to
-        ``~/.kiro/agents/``. Empty when the shared gateway is disabled.
+        Broker stubs outrank the same-named agent-spec entry so pooling does
+        not write a spec anywhere. Unpooled servers from the overlay (or the
+        agent file when the gateway is off) are included too: additional
+        sessions on a shared runtime never re-read the agent file, so they
+        would otherwise start with no MCP tools.
         """
-        return pooled_session_servers(
+        return session_mcp_servers(
             self._mcp_gateway_overlay, self._agent, self._channel_id
         )
 

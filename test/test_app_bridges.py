@@ -206,6 +206,92 @@ class TestAgentRegistration:
         assert "@ghost/summon" in warning
         assert "my-agent" in warning
 
+    def test_declared_mcp_server_is_mounted_when_tools_is_an_allowlist(
+        self, tmp_path, app_env
+    ):
+        """kiro-cli mounts a server only when ``tools`` references it.
+
+        An agent template can declare ``mcpServers`` (the dashboard shows the
+        row) while listing only built-in tools. Without an ``@name`` grant the
+        server never starts and its tools never appear — including on every
+        ``spawn_run`` of that agent. Materialization must add the ref.
+        """
+        src = _make_app_source(tmp_path)
+        (src / "agents" / "my-agent.json").write_text(
+            json.dumps(
+                {
+                    "name": "my-agent",
+                    "model": "auto",
+                    "mcpServers": {
+                        "roblox-studio": {"command": "npx", "args": ["-y", "roblox-studio-mcp"]}
+                    },
+                    "tools": ["read", "glob", "grep"],
+                }
+            )
+        )
+        install_app(src)
+        manifest = AppManifest.from_json_file(
+            app_env["home"] / "apps" / "test-app" / APP_MANIFEST_FILENAME
+        )
+        _register_agents("test-app", manifest, app_env["home"] / "apps" / "test-app")
+
+        written = json.loads(
+            (app_env["kiro_agents"] / "test-app--my-agent.json").read_text(encoding="utf-8")
+        )
+        assert "@roblox-studio" in written["tools"]
+        assert written["tools"][:3] == ["read", "glob", "grep"]
+
+    def test_existing_server_tool_ref_is_not_widened_to_a_blanket_grant(
+        self, tmp_path, app_env
+    ):
+        src = _make_app_source(tmp_path)
+        (src / "agents" / "my-agent.json").write_text(
+            json.dumps(
+                {
+                    "name": "my-agent",
+                    "model": "auto",
+                    "mcpServers": {"sdpm": {"command": "echo", "args": []}},
+                    "tools": ["read", "@sdpm/generate_pptx"],
+                }
+            )
+        )
+        install_app(src)
+        manifest = AppManifest.from_json_file(
+            app_env["home"] / "apps" / "test-app" / APP_MANIFEST_FILENAME
+        )
+        _register_agents("test-app", manifest, app_env["home"] / "apps" / "test-app")
+
+        written = json.loads(
+            (app_env["kiro_agents"] / "test-app--my-agent.json").read_text(encoding="utf-8")
+        )
+        assert written["tools"].count("@sdpm") == 0
+        assert "@sdpm/generate_pptx" in written["tools"]
+
+    def test_disabled_mcp_server_does_not_get_a_tool_ref(self, tmp_path, app_env):
+        src = _make_app_source(tmp_path)
+        (src / "agents" / "my-agent.json").write_text(
+            json.dumps(
+                {
+                    "name": "my-agent",
+                    "model": "auto",
+                    "mcpServers": {
+                        "off-srv": {"command": "echo", "args": [], "disabled": True}
+                    },
+                    "tools": ["read"],
+                }
+            )
+        )
+        install_app(src)
+        manifest = AppManifest.from_json_file(
+            app_env["home"] / "apps" / "test-app" / APP_MANIFEST_FILENAME
+        )
+        _register_agents("test-app", manifest, app_env["home"] / "apps" / "test-app")
+
+        written = json.loads(
+            (app_env["kiro_agents"] / "test-app--my-agent.json").read_text(encoding="utf-8")
+        )
+        assert "@off-srv" not in written["tools"]
+
     def test_resolvable_at_grants_log_no_dangling_warning(
         self, tmp_path, app_env, monkeypatch, caplog
     ):

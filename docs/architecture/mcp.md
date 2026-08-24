@@ -121,6 +121,20 @@ stale path in the global shadow the fresh path the gateway just resolved.
 Kiro Crew forces `false` on every agent it manages (the primary agent and every
 app agent). Plain kiro-cli agents outside Kiro Crew keep kiro-cli's own default.
 
+ACP `session/new` and `session/load` inject `session_mcp_servers()`: broker
+stubs for poolable servers, plus unpooled launch specs from the overlay or the
+agent file. Additional sessions on a shared runtime (subagents) do not re-read
+the agent file, so an empty `mcpServers` list would leave those tools absent.
+
+Injection is not enough to expose tools. kiro-cli mounts a server only when
+`tools` contains `@<server>` or `@<server>/<tool>`. A closed allowlist such as
+`["read", "glob", "grep"]` leaves a declared `mcpServers` row visible in the
+dashboard but unreachable at runtime — including every `spawn_run` of that
+agent. App-agent materialization (`apps/bridges.py`) appends `@<server>` for
+each template-declared, non-disabled server that has no such ref. A template
+that already grants `@<server>/<tool>` is left as-is (not widened to a
+blanket `@<server>`).
+
 ### Managed servers
 
 `agent._MANAGED_MCP_SERVERS` holds the three servers the gateway owns end to
