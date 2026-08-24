@@ -1,7 +1,8 @@
-# Agentic Implementation Plans
+# Superpowers docs
 
-Contributor-facing execution plans produced from accepted design documents.
-These plans are implementation checklists, not current-behavior contracts; the
-owning system spec remains authoritative after a change ships.
+Contributor-facing design specs and execution plans. Neither is a
+current-behavior contract; the owning system spec remains authoritative
+after a change ships.
 
+- [specs/](specs/README.md) — dated designs agreed before a plan is written.
 - [plans/](plans/README.md) — dated implementation plans.
