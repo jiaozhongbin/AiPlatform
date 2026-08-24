@@ -383,9 +383,15 @@ export interface TelegramConfigData {
   enabled: boolean
   allowed_user_ids: string[]
   soft_threshold_pct: number
+  /** Post the model's reasoning after each answer as a collapsed quote. */
+  show_thinking?: boolean
+  /** Speak each answer as a voice/audio message alongside the text. */
+  voice_replies?: boolean
   // Forum per-topic config. chat_ids are negative supergroup ids as strings.
   allow_forum?: boolean
   allowed_forum_chat_ids?: string[]
+  /** When to answer inside an allow-listed topic: "always" | "mention" | "off". */
+  forum_activation?: string
   /** Sidebar folder this channel's sessions are filed into ("" = off, the default). */
   session_folder?: string
 }
@@ -413,8 +419,11 @@ export interface TelegramConfigSave {
   enabled: boolean
   allowed_user_ids: string[]
   soft_threshold_pct: number
+  show_thinking?: boolean
+  voice_replies?: boolean
   allow_forum?: boolean
   allowed_forum_chat_ids?: string[]
+  forum_activation?: string
   /** Sidebar folder this channel's sessions are filed into ("" = off, the default). */
   session_folder?: string
 }
@@ -2066,7 +2075,12 @@ export const api = {
 
   // Lessons
   lessons: () => fetch('/api/lessons').then(j),
-  createLesson: (rule: string, category: string) => post('/api/lessons', { rule, category }).then(j),
+  createLesson: (rule: string, category: string) =>
+    post('/api/lessons', { rule, category }).then(j) as Promise<{
+      ok: boolean
+      outcome: 'inserted' | 'enriched' | 'unchanged' | 'deduped' | 'refused'
+      reason: string
+    }>,
   deleteLesson: (rule: string) => del('/api/lessons', { rule }).then(j),
   // Hooks
   hooks: () => fetch('/api/hooks').then(j),

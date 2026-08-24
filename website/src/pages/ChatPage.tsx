@@ -29,7 +29,7 @@ import {
   toggleActivity, openActivityPanel, openActivityToTab,
   selectSubagent,
   setActiveSlot, truncateAfterIndex, replaceMessages,
-  requestStop, pendingQuestionFor, captureStatelessCard, clearFollowupCard, dismissFollowupItem, clearFolderSuggestion,
+  requestStop, pendingQuestionFor, captureStatelessCard, clearFollowupCard, dismissFollowupItem, clearFolderSuggestion, ageFolderSuggestion,
   retireStatelessQuestion, capturePendingAskId, confirmOptimisticSend,
   requestSlotReveal,
   mcpAppKey,
@@ -2979,12 +2979,17 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
       body: JSON.stringify({ path: filePath, content }),
     })
     if (!res.ok) throw new Error(`Save failed: ${res.status}`)
+    // The saved bytes become the tab's dirty baseline, so a later re-open of
+    // the same path refreshes the buffer instead of (needlessly) preserving it
+    // as if it still held unsaved work. Best-effort: a tab that is not open
+    // right now is simply not found by id.
+    tabsCtl.patchTab(`file:${filePath}`, { savedContent: content })
     // Reconcile the inline-preview draft for the SAVING slot (drafts are
-    // slot+path keyed). Clear it ONLY if it still equals what we just saved —
+    // slot+path keyed). Clear it ONLY if it still equals what we just saved -
     // if the user typed more while the write was in flight, the draft now holds
     // newer content and must be preserved, not dropped.
     if (getInlineDraft(requestSlot, filePath) === content) clearInlineDraft(requestSlot, filePath)
-  }, [])
+  }, [tabsCtl])
 
   const takeScreenshot = useCallback(async () => {
     // Capture the slot at click-time. If the user switches away before the
@@ -3951,6 +3956,15 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
     // Same entry-time capture for a BLOCKING card, whose staleness is resolved
     // over the network instead of in the store.
     const askAtSend = capturePendingAskId(store.getState().chat.pendingQuestions, entrySendSlot)
+    // Entry-time capture of the folder-suggestion card, ONLY when it was
+    // actually on screen for this send: the card renders solely in this page's
+    // composer band for the ACTIVE slot, so a targeted send into another slot —
+    // and any send from a surface that never renders the card (ChatPane) — must
+    // not age it. The captured `ts` pins the card GENERATION the user saw; the
+    // aging dispatch below is ts-guarded so a replacement card arriving while
+    // the POST is in flight does not inherit this send's age.
+    const folderCardAtSend =
+      entrySendSlot && entrySendSlot === uiSlot ? store.getState().chat.folderSuggestions?.[entrySendSlot] : undefined
 
     // Slash command interception (e.g. /side): runs before knowledge so a
     // bare prefix like /side returns immediately without touching input parse.
@@ -4389,6 +4403,16 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
         // unconfirmed — a wrongly kept card is dismissible, a wrongly deleted
         // one is not recoverable).
         dispatch(retireStatelessQuestion({ slot, expected: cardAtSend }))
+      }
+      if (body.ok && !body.queued && folderCardAtSend && slot === entrySendSlot) {
+        // Same delivery bar and slot-identity guard as the stateless-card
+        // retirement above, for the folder-suggestion card's turn-aging: the
+        // card was on screen when the user hit send (captured at entry, active
+        // slot only) and the server confirmed the send was delivered. Failed
+        // sends never reach here; queued sends are still cancellable; forceNew
+        // reroutes answer nothing in the entry slot. ts pins the card
+        // generation, so a replacement that landed mid-flight is not aged.
+        dispatch(ageFolderSuggestion({ slot, ts: folderCardAtSend.ts }))
       }
       // The user answered in the composer instead of the card; a blocking card
       // is resolved over the network, so this cannot be a store-only retirement.
@@ -4920,8 +4944,14 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
     coldFileResults.forEach((r, i) => {
       const t = coldFileTabs[i]
       if (!t || t.content !== undefined) return
-      if (r.data) tabsCtl.patchTab(t.id, { content: r.data.text })
-      else if (r.isError) tabsCtl.patchTab(t.id, { content: i18nT('pages.chatPage.error_reading_file') })
+      if (r.data) tabsCtl.patchTab(t.id, { content: r.data.text, savedContent: r.data.text })
+      else if (r.isError) {
+        // The placeholder is not user work: stamp it as its own baseline so
+        // the tab counts clean and the next chip/tree click retries the read
+        // instead of "protecting" the error text as unsaved edits.
+        const errText = i18nT('pages.chatPage.error_reading_file')
+        tabsCtl.patchTab(t.id, { content: errText, savedContent: errText })
+      }
     })
   }, [coldFileResults, coldFileTabs, tabsCtl])
   // Session mode of the active slot. In the unified chat view the page-level
@@ -5261,7 +5291,7 @@ export default function ChatPage({ mode, embedded, embedMode, popout, noUrlSync 
     // then dispatch the seed. Fall back to dispatching after a cap so the
     // feature still works even if the input never resolves.
     const trySeed = (attempt = 0) => {
-      const mounted = document.querySelector('textarea[data-side-chat-input]')
+      const mounted = document.querySelector('[data-side-chat-input] textarea[data-composer-input]')
       if (mounted || attempt >= 20) {
         window.dispatchEvent(new CustomEvent('side-seed', { detail: { text } }))
       } else {
