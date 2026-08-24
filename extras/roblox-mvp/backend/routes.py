@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
-from typing import Any
+from pathlib import Path
 
 from aiohttp import web
 
 from kiro_crew.apps.context import AppContext
 from kiro_crew.apps.route_registry import AppRoute
 
-from backend.paths import safe_project_dir
-from backend.picker import PickerError, pick_folder_sync
-from backend.session import start_planner_session
+# Enable-time bootstrap: load_app_module execs this file via spec_from_file_location
+# and does not put the app root on sys.path (same as code_review_sage).
+_APP_ROOT = Path(__file__).resolve().parent.parent
+if str(_APP_ROOT) not in sys.path:
+    sys.path.insert(0, str(_APP_ROOT))
+
+from backend.paths import safe_project_dir  # noqa: E402
+from backend.picker import PickerError, pick_folder_sync  # noqa: E402
+from backend.session import start_planner_session  # noqa: E402
 
 _PICK_LOCK = threading.Lock()
 
@@ -38,7 +45,9 @@ async def handle_start(request: web.Request, ctx: AppContext) -> web.Response:
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"code": "invalid_json", "error": "JSON body required"}, status=400)
+        return web.json_response(
+            {"code": "invalid_json", "error": "JSON body required"}, status=400
+        )
     raw = ""
     if isinstance(body, dict):
         raw = str(body.get("project_dir") or "")
@@ -50,7 +59,9 @@ async def handle_start(request: web.Request, ctx: AppContext) -> web.Response:
         )
     state = request.app.get("state")
     if state is None:
-        return web.json_response({"code": "no_gateway_state", "error": "gateway state missing"}, status=500)
+        return web.json_response(
+            {"code": "no_gateway_state", "error": "gateway state missing"}, status=500
+        )
     result = start_planner_session(state, project_dir)
     return web.json_response(result, status=201)
 

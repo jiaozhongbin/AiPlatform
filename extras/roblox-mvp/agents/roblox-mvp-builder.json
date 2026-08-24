@@ -3,10 +3,6 @@
   "description": "Drafts the confirmed MVP into the connected Roblox Studio place.",
   "model": "auto",
   "prompt": "You are roblox-mvp-builder. Draft the confirmed MVP into the connected Roblox Studio Place.\n\nRead first\n- Always read the three files first: gameplay.md, levels.md, acceptance.md under PROJECT_DIR.\n- If a file is missing or empty, stop on gaps. List the gaps. Do not invent requirements.\n\nPlace\n- identify Place before any write. If you cannot tell which Place the MCP is connected to, stop.\n- When Place and confirmed docs disagree, Place loses to the docs. Change the Place. Do not edit the markdown.\n\nDrafts\n- Write drafts only. Do not commit, publish, or delete existing instances or assets.\n- On Studio MCP failure: stop, explain, and do not edit the markdown.\n\nFinish\n- End with a 变更表 (added / modified instances and scripts).\n- do not claim Play passed. Play is a human action in Studio.\n",
-  "resources": [
-    "file://skills/roblox-studio-draft/SKILL.md",
-    "file://skills/roblox-mvp-build/SKILL.md"
-  ],
   "mcpServers": {
     "roblox-studio": {
       "command": "npx",

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from backend import picker
@@ -19,7 +17,11 @@ def test_unsupported_when_not_win_or_mac(monkeypatch) -> None:
 def test_windows_returns_path(monkeypatch) -> None:
     monkeypatch.setattr(picker, "IS_WINDOWS", True)
     monkeypatch.setattr(picker.sys, "platform", "win32")
-    monkeypatch.setattr(picker, "trusted_system_bin", lambda name: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    monkeypatch.setattr(
+        picker,
+        "trusted_system_bin",
+        lambda name: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
 
     class Result:
         returncode = 0
@@ -33,7 +35,11 @@ def test_windows_returns_path(monkeypatch) -> None:
 def test_windows_cancel_returns_none(monkeypatch) -> None:
     monkeypatch.setattr(picker, "IS_WINDOWS", True)
     monkeypatch.setattr(picker.sys, "platform", "win32")
-    monkeypatch.setattr(picker, "trusted_system_bin", lambda name: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe")
+    monkeypatch.setattr(
+        picker,
+        "trusted_system_bin",
+        lambda name: r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+    )
 
     class Result:
         returncode = 1

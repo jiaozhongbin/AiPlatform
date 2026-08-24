@@ -30,7 +30,11 @@ def dispatch_seed_turn(state: Any, slot: Any, message: str) -> None:
     from kiro_crew.dashboard.turn_dispatch import bounded_chat_turn
 
     slot.append("user", message)
-    asyncio.get_running_loop().create_task(bounded_chat_turn(_run_chat(state, slot, message)))
+    task = asyncio.create_task(bounded_chat_turn(_run_chat(state, slot, message)))
+    slot.task = task
+    state._background_tasks.add(task)
+    task.add_done_callback(state._background_tasks.discard)
+    state.push_slots_update()
 
 
 def start_planner_session(state: Any, project_dir: Path) -> dict[str, str]:

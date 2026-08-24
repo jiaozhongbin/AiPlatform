@@ -19,16 +19,14 @@ def test_manifest_is_local_app_with_two_agents() -> None:
     assert (_APP / "ui" / "src" / "App.tsx").is_file()
 
 
-def test_manifest_declares_skills_mcp_pages_and_platforms() -> None:
+def test_manifest_declares_skills_pages_and_platforms() -> None:
     man = json.loads((_APP / "app.json").read_text(encoding="utf-8"))
     assert man["skills"] == [
         "skills/roblox-mvp-docs",
         "skills/roblox-studio-draft",
         "skills/roblox-mvp-build",
     ]
-    studio = man["mcpServers"]["roblox-studio"]
-    assert studio["command"] == "npx"
-    assert studio["args"] == ["-y", "roblox-studio-mcp"]
+    assert "mcpServers" not in man
     assert "/api/apps/roblox-mvp/*" in man["permissions"]["api"]
     assert "/api/chat/*" in man["permissions"]["api"]
     pages = man["ui"]["pages"]

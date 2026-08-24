@@ -77,7 +77,7 @@ def test_planner_prompt_and_md_share_required_phrases() -> None:
     md = (_APP / "prompts" / "spec.md").read_text(encoding="utf-8")
     _assert_phrases_in_both(spec["prompt"], md, _PLANNER_PHRASES)
     assert spec["welcomeMessage"] == "先用开始页选文件夹。选好后在这里聊玩法，确认前不会写 Studio。"
-    assert spec["resources"] == ["file://skills/roblox-mvp-docs/SKILL.md"]
+    assert "resources" not in spec
     assert spec["tools"] == ["read", "write", "glob", "grep", "use_subagent"]
     assert not spec["prompt"].startswith("file://")
 
@@ -86,10 +86,7 @@ def test_builder_prompt_and_md_share_required_phrases() -> None:
     builder = _agent("roblox-mvp-builder")
     md = (_APP / "prompts" / "builder.md").read_text(encoding="utf-8")
     _assert_phrases_in_both(builder["prompt"], md, _BUILDER_PHRASES)
-    assert builder["resources"] == [
-        "file://skills/roblox-studio-draft/SKILL.md",
-        "file://skills/roblox-mvp-build/SKILL.md",
-    ]
+    assert "resources" not in builder
     assert builder["tools"] == ["read", "glob", "grep"]
     assert builder["mcpServers"]["roblox-studio"]["command"] == "npx"
     assert builder["mcpServers"]["roblox-studio"]["args"] == ["-y", "roblox-studio-mcp"]

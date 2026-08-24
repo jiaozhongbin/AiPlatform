@@ -14,12 +14,6 @@
     "skills/roblox-studio-draft",
     "skills/roblox-mvp-build"
   ],
-  "mcpServers": {
-    "roblox-studio": {
-      "command": "npx",
-      "args": ["-y", "roblox-studio-mcp"]
-    }
-  },
   "permissions": {
     "api": [
       "/api/apps/roblox-mvp",
