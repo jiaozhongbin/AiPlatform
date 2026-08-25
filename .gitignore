@@ -141,6 +141,9 @@ runs.json
 # Scrub-lint alias list (internal, not published)
 scripts/.scrub-aliases.txt
 
+# Isolated git worktrees
+.worktrees/
+
 # Local session summary (working notes, not part of the PR)
 SESSION_SUMMARY.md
 

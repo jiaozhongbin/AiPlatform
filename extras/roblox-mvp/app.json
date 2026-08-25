@@ -1,0 +1,44 @@
+{
+  "name": "roblox-mvp",
+  "version": "0.1.0",
+  "displayName": "Roblox MVP",
+  "description": "对话写出玩法文档，确认后用 Studio MCP 搭一份可 Play 的草稿。",
+  "author": "kirocrew",
+  "defaultEnabled": false,
+  "agents": [
+    "agents/roblox-mvp-spec.json",
+    "agents/roblox-mvp-builder.json"
+  ],
+  "skills": [
+    "skills/roblox-mvp-docs",
+    "skills/roblox-studio-draft",
+    "skills/roblox-mvp-build"
+  ],
+  "permissions": {
+    "api": [
+      "/api/apps/roblox-mvp",
+      "/api/apps/roblox-mvp/*",
+      "/api/chat",
+      "/api/chat/*"
+    ],
+    "storage": true
+  },
+  "backend": {
+    "hooks": {
+      "routes": "backend.routes:register_routes"
+    }
+  },
+  "ui": {
+    "entry": "dist/index.mjs",
+    "pages": [
+      {
+        "route": "/roblox-mvp",
+        "label": "Roblox MVP",
+        "icon": "Gamepad2"
+      }
+    ]
+  },
+  "platform": {
+    "os": ["windows", "macos", "linux"]
+  }
+}
