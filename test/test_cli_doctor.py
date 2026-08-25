@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from conftest import requires_symlinks
 from kiro_crew import cli_doctor
 
 
@@ -504,10 +505,6 @@ class TestDoctorKas:
         self._patch_cfg(monkeypatch, "kas")
         from kiro_crew.acp import kas_assets, kas_auth
 
-        # Overrides select the direct-spawn path, whose diagnostics these
-        # assertions describe; without them doctor reports the cli-fronted
-        # branch instead.
-        monkeypatch.setenv(kas_assets.ENV_KAS_SCRIPT, "/nonexistent/acp-server.js")
         monkeypatch.setattr(kas_assets, "find_kas_node", lambda: None)
         monkeypatch.setattr(kas_assets, "find_kas_server_script", lambda: None)
 
@@ -528,7 +525,6 @@ class TestDoctorKas:
         self._patch_cfg(monkeypatch, "kas")
         from kiro_crew.acp import kas_assets, kas_auth
 
-        monkeypatch.setenv(kas_assets.ENV_KAS_SCRIPT, "/x/kas/9.9.9-hash/nm/acp-server.js")
         monkeypatch.setattr(kas_assets, "find_kas_node", lambda: Path("/x/node"))
         monkeypatch.setattr(
             kas_assets,
@@ -545,45 +541,6 @@ class TestDoctorKas:
         out = capsys.readouterr().out
         assert "9.9.9-hash" in out
         assert "2099-01-01T00:00:00Z" in out
-        assert "SECRET-DO-NOT-PRINT" not in out
-        assert issues == []
-
-    def test_cli_fronted_missing_kiro_cli_appends_issue(self, monkeypatch, capsys) -> None:
-        """Default (no override): readiness is kiro-cli itself being present."""
-        self._patch_cfg(monkeypatch, "kas")
-        from kiro_crew.acp import kas_assets, kas_auth
-
-        monkeypatch.delenv(kas_assets.ENV_KAS_NODE, raising=False)
-        monkeypatch.delenv(kas_assets.ENV_KAS_SCRIPT, raising=False)
-        monkeypatch.setattr(cli_doctor.shutil, "which", lambda _name: None)
-
-        async def _raise(*, timeout: float = 8.0):
-            raise kas_auth.KasAuthCallbackError("kiro-cli not found; cannot obtain a KAS token")
-
-        monkeypatch.setattr(kas_auth, "resolve_kas_access_token", _raise)
-        issues: list[str] = []
-        cli_doctor._doctor_kas(issues)
-        out = capsys.readouterr().out
-        assert "kiro-cli acp --agent-engine v3" in out
-        assert "KAS backend selected but kiro-cli not found" in issues
-
-    def test_cli_fronted_ready_reports_engine_flag(self, monkeypatch, capsys) -> None:
-        self._patch_cfg(monkeypatch, "kas")
-        from kiro_crew.acp import kas_assets, kas_auth
-
-        monkeypatch.delenv(kas_assets.ENV_KAS_NODE, raising=False)
-        monkeypatch.delenv(kas_assets.ENV_KAS_SCRIPT, raising=False)
-        monkeypatch.setattr(cli_doctor.shutil, "which", lambda _name: "/usr/bin/kiro-cli")
-        monkeypatch.setattr(cli_doctor, "_kas_engine_flag_supported", lambda _bin: True)
-
-        async def _ok(*, timeout: float = 8.0):
-            return {"accessToken": "SECRET-DO-NOT-PRINT", "expiresAt": "2099-01-01T00:00:00Z"}
-
-        monkeypatch.setattr(kas_auth, "resolve_kas_access_token", _ok)
-        issues: list[str] = []
-        cli_doctor._doctor_kas(issues)
-        out = capsys.readouterr().out
-        assert "engine flag" in out
         assert "SECRET-DO-NOT-PRINT" not in out
         assert issues == []
 
@@ -1434,6 +1391,7 @@ class TestEffectiveModelSection:
 
         assert "\x1b" not in capsys.readouterr().out
 
+    @requires_symlinks
     def test_a_symlink_to_a_sensitive_target_is_refused(self, monkeypatch, capsys) -> None:
         """The doctor read goes through agent_discovery's hardened reader, which
         refuses a symlink whose RESOLVED target is sensitive (the documented
@@ -1458,12 +1416,12 @@ class TestEffectiveModelSection:
         assert "unreadable" in out
         assert issues == ["agent spec unreadable"]
         assert "(defers)" in out.split("default spec pin:", 1)[1].splitlines()[0]
-        # ... and explains the gap instead of accusing its own tier list of being
-        # stale. `effective` may still carry the value: the RESOLVER reads the
-        # spec through its own path, which follows the link, and hiding what will
-        # actually run would make the report lie. That resolver-side following is
-        # pre-existing and main-owned; noted as a follow-up, not changed here.
-        assert "refused to follow" in out
+        # ... and nothing else acts on it either: the resolver reads through
+        # the same hardened reader, so it refuses too -- `effective` carries no
+        # value from the refused spec, and there is no resolver-vs-report gap
+        # to explain.
+        assert "leaked-value" not in out
+        assert "refused to follow" not in out
         assert "out of date" not in out
 
     def test_an_absent_spec_is_not_reported_as_a_fault(self, capsys) -> None:

@@ -769,13 +769,6 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         # classification as ``cli_doctor.py::_doctor`` above.
         "cli_doctor.py::_discord_intent_grants",
         "cli_doctor.py::_doctor_mcp_tools",
-        # Read-only diagnostic for the KAS backend section: ``<kiro-cli> acp
-        # --help`` with a fully constant argv tail — the binary comes from
-        # ``shutil.which(KIRO_CLI_BIN)`` (a fixed name, never agent-supplied)
-        # and the two trailing tokens are module constants. Operator-invoked
-        # doctor, 15s-capped, help text only — no session, no mutation. Same
-        # classification as the other fixed-argv doctor probes.
-        "cli_doctor.py::_kas_engine_flag_supported",
         # Read-only diagnostic for the Source Checkout section: ``git -C <repo>
         # rev-parse/rev-list`` with a hardcoded argv whose only variable is the
         # install's own source directory (derived from the package's module
@@ -808,6 +801,13 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         "cli_server.py::_logs_cmd",
         "cli_server.py::_spawn_detached_gateway",
         "cli_server.py::_update",
+        # The agent-only config refresh extracted from _update: a fixed argv
+        # (`<this interpreter> -m kiro_crew setup --agent-only`) built from
+        # sys.executable plus literals, cwd from the detected install layout —
+        # no shell, no PATH lookup, nothing agent-influenced. stdin=DEVNULL
+        # and TimeoutExpired handling are pinned by
+        # test_update_agent_refresh.py.
+        "cli_server.py::_refresh_agent_config",
         # (_divergence_verdict removed — its counting now delegates to the
         # git_divergence module, allowlisted below, and spawns nothing itself.)
         "cli_server.py::_update_wheel",
@@ -1047,7 +1047,6 @@ BENIGN_SPAWNS: frozenset[str] = frozenset(
         "pod/provision.py::_run",
         "pod/runtime.py::_git_worktrees",
         "pod/runtime.py::_run",
-        "pod/runtime.py::derive_port",
         "pod/runtime.py::recent_journal",
         "sandbox.py::_probe_sandbox_exec",
         "sandbox.py::_ssh_supports_accept_new",
